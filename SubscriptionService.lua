@@ -104,8 +104,7 @@ local HTTPService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- Objects --
-local Dependencies = script:WaitForChild("Dependencies")
-local SignalModuleObject = Dependencies:WaitForChild("GoodSignal")
+local SignalModuleObject = script.Parent:WaitForChild("GoodSignal")
 
 -- Tables --
 local registeredSubscriptions = {}
