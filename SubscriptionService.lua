@@ -129,6 +129,12 @@ local function processReceipt(receiptInfo)
 
 	if player then
 		local handler = productFunctions[productId]
+
+		if not handler then
+			warn("No handler registered for product ID:", productId)
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+
 		local success, result = pcall(handler, receiptInfo, player)
 
 		if success then
@@ -142,7 +148,7 @@ local function processReceipt(receiptInfo)
 end
 
 local function FindSubscriptionByNameInTable(SubscriptionName: string, Table)
-	for i, v in pairs(Table) do
+	for i, v in ipairs(Table) do
 		if v.Name == SubscriptionName then
 			return v, i
 		end
@@ -154,7 +160,7 @@ end
 local function FindSubscriptionByName(SubscriptionName: string)
 	local FoundSubscription = nil
 
-	for i, v in pairs(registeredSubscriptions) do 
+	for i, v in ipairs(registeredSubscriptions) do
 		if v.Name == SubscriptionName then 
 			FoundSubscription = v
 			break 
@@ -165,15 +171,10 @@ local function FindSubscriptionByName(SubscriptionName: string)
 end
 
 local function CheckSubscriptionValidity(PurchaseDate, Duration)
-	local CurrectTime = tick()
-
+	local CurrentTime = os.time()
 	local ExpirationDate = PurchaseDate + toSeconds(Duration)
 
-	if ExpirationDate <= CurrectTime then
-		return false
-	else
-		return true
-	end
+	return ExpirationDate > CurrentTime
 end
 
 local SubscriptionModule = {
@@ -214,8 +215,8 @@ function SubscriptionModule.UnixToReadableTime(Timestamp: number) -- This is in 
 end
 
 function SubscriptionModule.FetchPlayerSubscriptionData(Player: Player)
-	for Index, Value in pairs(SubscriptionModule.PlayerSubscriptions) do
-		if Value.Name == Player.Name then
+	for Index, Value in ipairs(SubscriptionModule.PlayerSubscriptions) do
+		if Value.UserId == Player.UserId then
 			return Value, Index
 		end
 	end
@@ -225,7 +226,10 @@ end
 
 -- A function to register a subscription using a SubscriptionData object --
 function SubscriptionModule.RegisterSubscription(SubscriptionData: any)
-	if not SubscriptionData.Name or not SubscriptionData.Duration then warn("Incomplete table detected when passing through a table! Are you sure that each subscription table has values called Name and Duration?") end
+	if not SubscriptionData.Name or not SubscriptionData.Duration then
+		warn("Incomplete table detected when passing through a table! Are you sure that each subscription table has values called Name and Duration?")
+		return
+	end
 
 	table.insert(registeredSubscriptions, SubscriptionData)
 end
@@ -266,9 +270,7 @@ end
 -- A function to grant a subscription to a player --
 function SubscriptionModule.GrantSubscription(Player: Player, SubscriptionName: string)
 	local PlayerSubscriptionData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-	local SubscriptionInfo = nil
-
-	SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
+	local SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
 
 	if PlayerSubscriptionData == nil then error("Player subscription data was not found for "..Player.Name..". Issue with the module. Please message scope.") end
 	if SubscriptionInfo == nil then error('Subscription by the name "'..SubscriptionName..'" has not been found in the list of registered subscriptions. Did you register the intended subscription under the correct name?') end
@@ -278,7 +280,7 @@ function SubscriptionModule.GrantSubscription(Player: Player, SubscriptionName: 
 	if SubscriptionWantedInTable == nil then
 		local Subscription = {
 			Name = SubscriptionName,
-			PurchaseDate = tick(),
+			PurchaseDate = os.time(),
 		}
 
 		table.insert(PlayerSubscriptionData.ActiveSubscriptions, Subscription)
@@ -312,15 +314,7 @@ function SubscriptionModule.RevokeSubscription(Player: Player, SubscriptionName:
 end
 
 function SubscriptionModule.FetchSubscriptionInfo(SubscriptionName: string)
-	local SubscriptionInfo = nil
-
-	SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
-
-	if SubscriptionInfo ~= nil then
-		return SubscriptionInfo
-	else
-		return nil
-	end
+	return FindSubscriptionByName(SubscriptionName)
 end
 
 function SubscriptionModule.loadPlayer(Player: Player) -- creates the subscription storage and filters whichever ones the player has and whichever ones are expired
@@ -328,13 +322,14 @@ function SubscriptionModule.loadPlayer(Player: Player) -- creates the subscripti
 
 	local PlayerSubscriptions = {
 		Name = Player.Name,
+		UserId = Player.UserId,
 		ActiveSubscriptions = {}
 	}
 
 	if PlayerData then
 		local decodeddata = HTTPService:JSONDecode(PlayerData)
 
-		for i, v in pairs(decodeddata.ActiveSubscriptions) do
+		for i, v in ipairs(decodeddata.ActiveSubscriptions) do
 			local SubscriptionInfo = nil
 
 			SubscriptionInfo = FindSubscriptionByName(v.Name)
@@ -365,13 +360,18 @@ function SubscriptionModule.loadPlayer(Player: Player) -- creates the subscripti
 
 			if SubscriptionTable == nil then break end
 
-			for i, Subscription in pairs(SubscriptionTable.ActiveSubscriptions) do
-				local SubscriptionInfo = FindSubscriptionByName(Subscription.Name) or nil
+			-- Iterate backwards to safely remove while iterating
+			for i = #SubscriptionTable.ActiveSubscriptions, 1, -1 do
+				local Subscription = SubscriptionTable.ActiveSubscriptions[i]
+				local SubscriptionInfo = FindSubscriptionByName(Subscription.Name)
 
-				if SubscriptionInfo == nil then warn("Subscription by the name '"..Subscription.Name.."' was not found while listening for expiration.") end
+				if SubscriptionInfo == nil then
+					warn("Subscription by the name '"..Subscription.Name.."' was not found while listening for expiration.")
+					continue
+				end
 
 				if Subscription.PurchaseDate ~= nil then
-					if CheckSubscriptionValidity(Subscription.PurchaseDate, SubscriptionInfo.Duration) == false then
+					if not CheckSubscriptionValidity(Subscription.PurchaseDate, SubscriptionInfo.Duration) then
 						SubscriptionModule.SubscriptionExpired:Fire(Player, {
 							Name = Subscription.Name,
 							PurchaseDate = Subscription.PurchaseDate
@@ -390,11 +390,11 @@ end
 function SubscriptionModule.unloadPlayer(Player: Player)
 	local SubscriptionTable, Index = SubscriptionModule.FetchPlayerSubscriptionData(Player)
 
-	if SubscriptionTable == nil then error(Player.Name.." not found in the main table of the SubscriptionService while saving data: Module error.") return end
+	if SubscriptionTable == nil then error(Player.Name.." not found in the main table of the SubscriptionService while saving data: Module error.") end
 
 	local SubscriptionsOwnedByPlayer = {}
 
-	for _, Subscription in pairs(SubscriptionTable.ActiveSubscriptions) do
+	for _, Subscription in ipairs(SubscriptionTable.ActiveSubscriptions) do
 		local SubscriptionInfo = FindSubscriptionByName(Subscription.Name)
 
 		if SubscriptionInfo == nil then warn("Subscription by the name '"..Subscription.Name.."' was not found in the saving process.") end
@@ -417,7 +417,7 @@ do
 		task.spawn(function()
 			task.wait(SubscriptionModule.Product_Handling_Yield)
 
-			for _, Subscription in pairs(registeredSubscriptions) do
+			for _, Subscription in ipairs(registeredSubscriptions) do
 				productFunctions[Subscription.ProductId] = function(receipt, player)
 					SubscriptionModule.GrantSubscription(player, Subscription.Name)
 				end
