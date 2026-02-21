@@ -9,123 +9,158 @@ easy to use substitute for this as this modules allows developers to set up subs
 ----- API REFERENCE -----
 
 -------------------------------------------------------------
- Settings 
+ Settings
 -------------------------------------------------------------
- .     Expiration_Check_Rate (number):                   Rate for checking subscription expirations.
- .     Handle_Subscription_Purchases (boolean):          When true, the module will handle the subscription purchases. All you have to do is prompt the player with the Developer product and the module will handle it                                                   
- .     Print_Credits (boolean):                          Print credits to console.
- .     Product_Handling_Yield (number):                  Yield for product handling.
+ .     Expiration_Check_Rate (number):        Rate (seconds) for checking subscription expirations.
+ .     Handle_Subscription_Purchases (bool):  When true, the module handles Developer Product receipts automatically.
+ .     Print_Credits (boolean):               Print credits to console on startup.
+ .     Product_Handling_Yield (number):       Yield before setting up the ProcessReceipt handler.
+ .     Expiring_Soon_Threshold (number):      Days before expiry at which SubscriptionExpiringSoon fires. Default: 3.
 
 
 -------------------------------------------------------------
- Signals 
+ Signals
 -------------------------------------------------------------
- .     SubscriptionExpired:             Fired when a subscription expires.
+ .     SubscriptionExpired:
+             Fired when a subscription expires or is revoked.
              Args: (Player: Player, Subscription: table)
-                   Player is just the player object of the subscription owner.
-                  
-                   Subscription: 
-                   {
-                        Name = "subscription name here", -- Name of the subscription in a string
-                        PurchaseDate = 57939529247 -- The UNIX timestamp of when the subscription was purchased
-                   }
- 
- 
- 
- .     SubscriptionPurchased:          Fired when a subscription is purchased.
+                   Subscription: { Name: string, PurchaseDate: number }
+
+ .     SubscriptionPurchased:
+             Fired when a subscription is granted for the first time.
              Args: (Player: Player, Subscription: table)
-             
-                    Subscription: 
-                   {
-                        Name = "subscription name here", -- Name of the subscription in a string
-                        PurchaseDate = 57939529247 -- The UNIX timestamp of when the subscription was purchased
-                   }
-                   
-                   
+                   Subscription: { Name: string, PurchaseDate: number }
+
+ .     SubscriptionRenewed:
+             Fired when a stackable subscription is re-granted (renewed).
+             Args: (Player: Player, Subscription: table)
+                   Subscription: { Name: string, PurchaseDate: number }
+
+ .     SubscriptionExpiringSoon:
+             Fired during the expiration check loop when remaining time drops below Expiring_Soon_Threshold.
+             Args: (Player: Player, Subscription: table, RemainingSeconds: number)
+
+
 -------------------------------------------------------------
- Functions 
+ Functions — Date / Time Utilities
 -------------------------------------------------------------
- 
- .     Module.UnixToDDMMYY(Timestamp: number): Converts a Unix timestamp to DD/MM/YY format. Useful for making the expiration dates and stuff into readable dates.
-             return: 31/10/2022 (the date of a timestamp.)
- 
- .     Module.UnixToMMDDYY(Timestamp: number): Converts a Unix timestamp to MM/DD/YY format. Useful for making the expiration dates and stuff into readable dates.
-             return: 10/31/2022 (freedom date format. the date of a timestamp)
- 
- .     Module.UnixToReadableTime(Timestamp: number): Converts a Unix timestamp to a readable time format (UTC). Useful for making the expiration dates and stuff into readable dates.
-             return: 22:20 (the readable time of a timestamp)
- 
- .     Module.FetchPlayerSubscriptionData(Player: Player): Fetches subscription data for a player.
-             return:
-                   {
-                     Name = "PlayerName"
-                     
-                     ActiveSubscriptions = {}
-                   }
- 
- .     Module.RegisterSubscription(SubscriptionData: any): Registers a subscription.
-             no return
- 
- .     Module.DoesPlayerOwnSubscription(Player: Player, SubscriptionName: string): Checks if a player owns a subscription.
-             return: true/false depending if the player owns the subscription or not
- 
- .     Module.GrantSubscription(Player: Player, SubscriptionName: string): Grants a subscription to a player.
-             no return
- 
- .     Module.RevokeSubscription(Player: Player, SubscriptionName: string): Revokes a subscription from a player.
-             no return
- 
- 
- .     Module.AdjustSubscription(Player: Player, SubscriptionName: string, Days: number): Adjusts the expiration date of a subscription to grant extra days. if the number is negative, it will take days away
-             no return
- 
- .     Module.FetchSubscriptionInfo(SubscriptionName: string): Fetches subscription information.
-              return:
-                    {
-                    
-                     Name = "Test Subscription",
-		           ProductId = 1679061197,
-		           Duration = 7,
-		           Stackable = true,
-                    }
- 
- .     Module.loadPlayer(Player: Player): Loads player subscription data.
-             no return
- 
- .     Module.unloadPlayer(Player: Player): Unloads player subscription data.
-             no return
+ .     Module.UnixToDDMMYY(Timestamp: number)
+             return: "31/10/2022"
+
+ .     Module.UnixToMMDDYY(Timestamp: number)
+             return: "10/31/2022"
+
+ .     Module.UnixToReadableTime(Timestamp: number)
+             return: "22:20"  (UTC)
+
+ .     Module.UnixToFullDateTime(Timestamp: number)
+             return: "Oct 31, 2025 at 22:20 UTC"
+
+
+-------------------------------------------------------------
+ Functions — Subscription Queries
+-------------------------------------------------------------
+ .     Module.FetchPlayerSubscriptionData(Player: Player)
+             return: { Name: string, UserId: number, ActiveSubscriptions: table } or nil
+
+ .     Module.FetchSubscriptionInfo(SubscriptionName: string)
+             return: { Name: string, ProductId: number, Duration: number, Stackable: boolean } or nil
+
+ .     Module.DoesPlayerOwnSubscription(Player: Player, SubscriptionName: string)
+             return: true / false
+
+ .     Module.GetSubscriptionExpiration(Player: Player, SubscriptionName: string)
+             return: number (Unix timestamp) or nil
+
+ .     Module.GetTimeUntilExpiration(Player: Player, SubscriptionName: string)
+             return: { Days: number, Hours: number, Minutes: number, Seconds: number, TotalSeconds: number }
+
+ .     Module.IsSubscriptionExpiringSoon(Player: Player, SubscriptionName: string, ThresholdDays: number?)
+             return: true / false
+
+ .     Module.GetAllSubscribedPlayers(SubscriptionName: string)
+             return: { Player, ... }  (loaded players only)
+
+ .     Module.GetSubscriptionPurchaseCount(Player: Player, SubscriptionName: string)
+             return: number  (lifetime purchase + renewal count)
+
+
+-------------------------------------------------------------
+ Functions — Subscription Management
+-------------------------------------------------------------
+ .     Module.RegisterSubscription(SubscriptionData: any)        no return
+ .     Module.GrantSubscription(Player: Player, SubscriptionName: string)        no return
+ .     Module.RevokeSubscription(Player: Player, SubscriptionName: string)       no return
+ .     Module.AdjustSubscription(Player: Player, SubscriptionName: string, Days: number)   no return
+ .     Module.PauseSubscription(Player: Player, SubscriptionName: string)        no return
+ .     Module.ResumeSubscription(Player: Player, SubscriptionName: string)       no return
+
+
+-------------------------------------------------------------
+ Functions — Player Lifecycle
+-------------------------------------------------------------
+ .     Module.loadPlayer(Player: Player)      no return
+ .     Module.unloadPlayer(Player: Player)    no return
 -------------------------------------------------------------
 ]]
 
 -- Services --
-local MarketplaceService = game:GetService("MarketplaceService") 
-local DataStoreService = game:GetService("DataStoreService")
-local HTTPService = game:GetService("HttpService")
-local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local DataStoreService   = game:GetService("DataStoreService")
+local HTTPService        = game:GetService("HttpService")
+local Players            = game:GetService("Players")
 
 -- Objects --
-local SignalModuleObject = script.Parent:WaitForChild("GoodSignal")
+local SignalModuleObject   = script.Parent:WaitForChild("GoodSignal")
+local DateTimeUtilsObject  = script.Parent:WaitForChild("DateTimeUtils")
+
+-- Modules --
+local Signal       = require(SignalModuleObject)
+local DateTimeUtils = require(DateTimeUtilsObject)
 
 -- Tables --
 local registeredSubscriptions = {}
-local productFunctions = {}
+local productFunctions        = {}
 
--- Modules --
-local Signal = require(SignalModuleObject)
-
--- Datastore --
-local SubscriptionDataStore = DataStoreService:GetDataStore("uj6rtrtrjursjtrsjtrsxrtj")
+-- DataStores --
+local SubscriptionDataStore  = DataStoreService:GetDataStore("uj6rtrtrjursjtrsjtrsxrtj")
+local PurchaseCountDataStore = DataStoreService:GetDataStore("SubscriptionPurchaseCounts")
 
 -- Local Functions --
-local function toSeconds(Days: number)
+local function toSeconds(Days: number): number
 	return Days * 86400
 end
 
-local function processReceipt(receiptInfo)
-	local userId = receiptInfo.PlayerId
-	local productId = receiptInfo.ProductId
+local function retryAsync(fn: () -> any, maxAttempts: number): (boolean, any)
+	local attempts = 0
+	repeat
+		attempts += 1
+		local success, result = pcall(fn)
+		if success then
+			return true, result
+		end
+		if attempts < maxAttempts then
+			task.wait(2 ^ (attempts - 1))
+		else
+			warn("DataStore operation failed after " .. maxAttempts .. " attempts: " .. tostring(result))
+		end
+	until attempts >= maxAttempts
+	return false, nil
+end
 
-	local player = Players:GetPlayerByUserId(userId)
+local function incrementPurchaseCount(UserId: number, SubscriptionName: string)
+	local key = tostring(UserId) .. "_" .. SubscriptionName
+	retryAsync(function()
+		PurchaseCountDataStore:UpdateAsync(key, function(current)
+			return (current or 0) + 1
+		end)
+	end, 3)
+end
+
+local function processReceipt(receiptInfo)
+	local userId   = receiptInfo.PlayerId
+	local productId = receiptInfo.ProductId
+	local player   = Players:GetPlayerByUserId(userId)
 
 	if player then
 		local handler = productFunctions[productId]
@@ -147,202 +182,338 @@ local function processReceipt(receiptInfo)
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 
-local function FindSubscriptionByNameInTable(SubscriptionName: string, Table)
+local function FindSubscriptionByNameInTable(SubscriptionName: string, Table: {any})
 	for i, v in ipairs(Table) do
 		if v.Name == SubscriptionName then
 			return v, i
 		end
 	end
-
 	return nil
 end
 
 local function FindSubscriptionByName(SubscriptionName: string)
-	local FoundSubscription = nil
-
-	for i, v in ipairs(registeredSubscriptions) do
-		if v.Name == SubscriptionName then 
-			FoundSubscription = v
-			break 
-		end 
+	for _, v in ipairs(registeredSubscriptions) do
+		if v.Name == SubscriptionName then
+			return v
+		end
 	end
-
-	return FoundSubscription
+	return nil
 end
 
-local function CheckSubscriptionValidity(PurchaseDate, Duration)
-	local CurrentTime = os.time()
-	local ExpirationDate = PurchaseDate + toSeconds(Duration)
-
-	return ExpirationDate > CurrentTime
+local function CheckSubscriptionValidity(Subscription: {any}, Duration: number): boolean
+	if Subscription.PausedAt ~= nil then
+		return true
+	end
+	return (Subscription.PurchaseDate + toSeconds(Duration)) > os.time()
 end
 
+-- Module --
 local SubscriptionModule = {
-	-- Presets --
-	Expiration_Check_Rate = 10, 
-	Handle_Subscription_Purchases = true, 
-	Print_Credits = true,
-	Product_Handling_Yield = 0.5,
+	Expiration_Check_Rate         = 10,
+	Handle_Subscription_Purchases = true,
+	Print_Credits                 = true,
+	Product_Handling_Yield        = 0.5,
+	Expiring_Soon_Threshold       = 3,
 
 	-- DO NOT TOUCH BELOW --
 	PlayerSubscriptions = {}
 }
 
-SubscriptionModule.SubscriptionExpired = Signal.new()
-SubscriptionModule.SubscriptionPurchased = Signal.new()
+SubscriptionModule.SubscriptionExpired      = Signal.new()
+SubscriptionModule.SubscriptionPurchased    = Signal.new()
+SubscriptionModule.SubscriptionRenewed      = Signal.new()
+SubscriptionModule.SubscriptionExpiringSoon = Signal.new()
 
--- Functions to handle date and time conversions --
-function SubscriptionModule.UnixToDDMMYY(Timestamp: number)
-	local t = os.date("*t", Timestamp)
-
-	local DateString = tostring(t.day.."/"..t.month.."/"..t.year)
-
-	return DateString
+-- Date / Time Utilities (delegated to DateTimeUtils) --
+function SubscriptionModule.UnixToDDMMYY(Timestamp: number): string
+	return DateTimeUtils.UnixToDDMMYY(Timestamp)
 end
 
-function SubscriptionModule.UnixToMMDDYY(Timestamp: number)
-	local t = os.date("*t", Timestamp)
-
-	local DateString = tostring(t.month.."/"..t.day.."/"..t.year)
-
-	return DateString
+function SubscriptionModule.UnixToMMDDYY(Timestamp: number): string
+	return DateTimeUtils.UnixToMMDDYY(Timestamp)
 end
 
-function SubscriptionModule.UnixToReadableTime(Timestamp: number) -- This is in UTC
-	local t = os.date("*t", Timestamp)
-
-	return tostring(t.hour..":"..t.min)
+function SubscriptionModule.UnixToReadableTime(Timestamp: number): string
+	return DateTimeUtils.UnixToReadableTime(Timestamp)
 end
 
+function SubscriptionModule.UnixToFullDateTime(Timestamp: number): string
+	return DateTimeUtils.UnixToFullDateTime(Timestamp)
+end
+
+-- Subscription Queries --
 function SubscriptionModule.FetchPlayerSubscriptionData(Player: Player)
 	for Index, Value in ipairs(SubscriptionModule.PlayerSubscriptions) do
 		if Value.UserId == Player.UserId then
 			return Value, Index
 		end
 	end
-
 	return nil
-end
-
--- A function to register a subscription using a SubscriptionData object --
-function SubscriptionModule.RegisterSubscription(SubscriptionData: any)
-	if not SubscriptionData.Name or not SubscriptionData.Duration then
-		warn("Incomplete table detected when passing through a table! Are you sure that each subscription table has values called Name and Duration?")
-		return
-	end
-
-	table.insert(registeredSubscriptions, SubscriptionData)
-end
-
--- A function to check if a player owns a certain subscription (Returns: true/false) --
-function SubscriptionModule.DoesPlayerOwnSubscription(Player: Player, SubscriptionName: string)
-	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-
-	if PlayerData ~= nil then
-		local SearchingForSubscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
-
-		if SearchingForSubscription ~= nil then
-			return true
-		else
-			return false
-		end
-	else
-		warn("Subscription data failed to fetch! ;(")
-	end
-end
-
-function SubscriptionModule.AdjustSubscription(Player: Player, SubscriptionName: string, Days: number)
-	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-
-	if PlayerData ~= nil then
-		local SearchingForSubscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
-
-		if SearchingForSubscription ~= nil then
-			SearchingForSubscription.PurchaseDate += toSeconds(Days)
-		else
-			warn(Player.Name.." does not own subscription "..SubscriptionName.."! Try granting the subscription first.")
-		end
-	else
-		warn("Subscription data failed to fetch! ;(;(")
-	end
-end
-
--- A function to grant a subscription to a player --
-function SubscriptionModule.GrantSubscription(Player: Player, SubscriptionName: string)
-	local PlayerSubscriptionData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-	local SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
-
-	if PlayerSubscriptionData == nil then error("Player subscription data was not found for "..Player.Name..". Issue with the module. Please message scope.") end
-	if SubscriptionInfo == nil then error('Subscription by the name "'..SubscriptionName..'" has not been found in the list of registered subscriptions. Did you register the intended subscription under the correct name?') end
-
-	local SubscriptionWantedInTable = FindSubscriptionByNameInTable(SubscriptionName, PlayerSubscriptionData.ActiveSubscriptions)
-
-	if SubscriptionWantedInTable == nil then
-		local Subscription = {
-			Name = SubscriptionName,
-			PurchaseDate = os.time(),
-		}
-
-		table.insert(PlayerSubscriptionData.ActiveSubscriptions, Subscription)
-		SubscriptionModule.SubscriptionPurchased:Fire(Player, Subscription)
-	else
-		if SubscriptionInfo.Stackable == true then
-			SubscriptionWantedInTable.PurchaseDate += toSeconds(SubscriptionInfo.Duration)
-			SubscriptionModule.SubscriptionPurchased:Fire(Player, SubscriptionWantedInTable)
-		else
-			warn(Player.Name.." already owns subscription '"..SubscriptionName.."'!")
-		end
-	end
-end
-
--- A function that that handles overall revoking of a subscription --
-function SubscriptionModule.RevokeSubscription(Player: Player, SubscriptionName: string)
-	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-
-	if PlayerData ~= nil then
-		local SearchingForSubscription, PositionInTable = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
-
-		if SearchingForSubscription ~= nil then
-			SubscriptionModule.SubscriptionExpired:Fire(Player, {Name = SubscriptionName, PurchaseDate = SearchingForSubscription.PurchaseDate})
-			table.remove(PlayerData.ActiveSubscriptions, PositionInTable)
-		else
-			warn(Player.Name.." does not own subscription "..SubscriptionName.." so there is no point in revoking the subscription!")
-		end
-	else
-		warn("Subscription data failed to fetch! ;(")
-	end
 end
 
 function SubscriptionModule.FetchSubscriptionInfo(SubscriptionName: string)
 	return FindSubscriptionByName(SubscriptionName)
 end
 
-function SubscriptionModule.loadPlayer(Player: Player) -- creates the subscription storage and filters whichever ones the player has and whichever ones are expired
-	local PlayerData = SubscriptionDataStore:GetAsync(Player.UserId)
+function SubscriptionModule.DoesPlayerOwnSubscription(Player: Player, SubscriptionName: string): boolean
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
 
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return false
+	end
+
+	return FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions) ~= nil
+end
+
+function SubscriptionModule.GetSubscriptionExpiration(Player: Player, SubscriptionName: string): number?
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return nil
+	end
+
+	local Subscription    = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+	local SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
+
+	if Subscription == nil or SubscriptionInfo == nil then
+		warn('Subscription "' .. SubscriptionName .. '" not found for ' .. Player.Name)
+		return nil
+	end
+
+	return Subscription.PurchaseDate + toSeconds(SubscriptionInfo.Duration)
+end
+
+function SubscriptionModule.GetTimeUntilExpiration(Player: Player, SubscriptionName: string): {any}
+	local Expiration = SubscriptionModule.GetSubscriptionExpiration(Player, SubscriptionName)
+
+	if Expiration == nil then
+		return { Days = 0, Hours = 0, Minutes = 0, Seconds = 0, TotalSeconds = 0 }
+	end
+
+	local Remaining = math.max(0, Expiration - os.time())
+
+	return {
+		Days         = math.floor(Remaining / 86400),
+		Hours        = math.floor((Remaining % 86400) / 3600),
+		Minutes      = math.floor((Remaining % 3600) / 60),
+		Seconds      = Remaining % 60,
+		TotalSeconds = Remaining
+	}
+end
+
+function SubscriptionModule.IsSubscriptionExpiringSoon(Player: Player, SubscriptionName: string, ThresholdDays: number?): boolean
+	local Threshold = ThresholdDays or SubscriptionModule.Expiring_Soon_Threshold
+	local TimeUntil = SubscriptionModule.GetTimeUntilExpiration(Player, SubscriptionName)
+	return TimeUntil.TotalSeconds > 0 and TimeUntil.TotalSeconds < toSeconds(Threshold)
+end
+
+function SubscriptionModule.GetAllSubscribedPlayers(SubscriptionName: string): {Player}
+	local SubscribedPlayers = {}
+
+	for _, PlayerData in ipairs(SubscriptionModule.PlayerSubscriptions) do
+		if FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions) ~= nil then
+			local Player = Players:GetPlayerByUserId(PlayerData.UserId)
+			if Player then
+				table.insert(SubscribedPlayers, Player)
+			end
+		end
+	end
+
+	return SubscribedPlayers
+end
+
+function SubscriptionModule.GetSubscriptionPurchaseCount(Player: Player, SubscriptionName: string): number
+	local key = tostring(Player.UserId) .. "_" .. SubscriptionName
+	local _, count = retryAsync(function()
+		return PurchaseCountDataStore:GetAsync(key)
+	end, 3)
+	return count or 0
+end
+
+-- Subscription Management --
+function SubscriptionModule.RegisterSubscription(SubscriptionData: any)
+	if not SubscriptionData.Name or not SubscriptionData.Duration then
+		warn("Incomplete subscription table! Ensure each subscription has a Name and Duration.")
+		return
+	end
+	table.insert(registeredSubscriptions, SubscriptionData)
+end
+
+function SubscriptionModule.GrantSubscription(Player: Player, SubscriptionName: string)
+	local PlayerSubscriptionData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+	local SubscriptionInfo       = FindSubscriptionByName(SubscriptionName)
+
+	if PlayerSubscriptionData == nil then
+		error("Player subscription data was not found for " .. Player.Name .. ". Issue with the module.")
+	end
+	if SubscriptionInfo == nil then
+		error('Subscription "' .. SubscriptionName .. '" has not been registered. Did you call RegisterSubscription?')
+	end
+
+	local ExistingSubscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerSubscriptionData.ActiveSubscriptions)
+
+	if ExistingSubscription == nil then
+		local Subscription = { Name = SubscriptionName, PurchaseDate = os.time() }
+		table.insert(PlayerSubscriptionData.ActiveSubscriptions, Subscription)
+		SubscriptionModule.SubscriptionPurchased:Fire(Player, Subscription)
+		task.spawn(incrementPurchaseCount, Player.UserId, SubscriptionName)
+	else
+		if SubscriptionInfo.Stackable == true then
+			ExistingSubscription.PurchaseDate += toSeconds(SubscriptionInfo.Duration)
+			SubscriptionModule.SubscriptionRenewed:Fire(Player, ExistingSubscription)
+			task.spawn(incrementPurchaseCount, Player.UserId, SubscriptionName)
+		else
+			warn(Player.Name .. " already owns subscription '" .. SubscriptionName .. "'!")
+		end
+	end
+end
+
+function SubscriptionModule.RevokeSubscription(Player: Player, SubscriptionName: string)
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return
+	end
+
+	local Subscription, PositionInTable = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+
+	if Subscription ~= nil then
+		SubscriptionModule.SubscriptionExpired:Fire(Player, { Name = SubscriptionName, PurchaseDate = Subscription.PurchaseDate })
+		table.remove(PlayerData.ActiveSubscriptions, PositionInTable)
+	else
+		warn(Player.Name .. " does not own subscription '" .. SubscriptionName .. "', nothing to revoke.")
+	end
+end
+
+function SubscriptionModule.AdjustSubscription(Player: Player, SubscriptionName: string, Days: number)
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return
+	end
+
+	local Subscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+
+	if Subscription ~= nil then
+		Subscription.PurchaseDate += toSeconds(Days)
+	else
+		warn(Player.Name .. " does not own subscription '" .. SubscriptionName .. "'. Grant it first.")
+	end
+end
+
+function SubscriptionModule.PauseSubscription(Player: Player, SubscriptionName: string)
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return
+	end
+
+	local Subscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+
+	if Subscription == nil then
+		warn(Player.Name .. " does not own subscription '" .. SubscriptionName .. "'!")
+		return
+	end
+
+	if Subscription.PausedAt ~= nil then
+		warn("Subscription '" .. SubscriptionName .. "' is already paused for " .. Player.Name)
+		return
+	end
+
+	Subscription.PausedAt = os.time()
+end
+
+function SubscriptionModule.ResumeSubscription(Player: Player, SubscriptionName: string)
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return
+	end
+
+	local Subscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+
+	if Subscription == nil then
+		warn(Player.Name .. " does not own subscription '" .. SubscriptionName .. "'!")
+		return
+	end
+
+	if Subscription.PausedAt == nil then
+		warn("Subscription '" .. SubscriptionName .. "' is not paused for " .. Player.Name)
+		return
+	end
+
+	Subscription.PurchaseDate += os.time() - Subscription.PausedAt
+	Subscription.PausedAt = nil
+end
+
+-- Player Lifecycle --
+local function startExpirationListener(Player: Player)
+	local listener = coroutine.create(function()
+		repeat
+			task.wait(SubscriptionModule.Expiration_Check_Rate)
+			if Player == nil then break end
+
+			local SubscriptionTable = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+			if SubscriptionTable == nil then break end
+
+			for i = #SubscriptionTable.ActiveSubscriptions, 1, -1 do
+				local Subscription    = SubscriptionTable.ActiveSubscriptions[i]
+				local SubscriptionInfo = FindSubscriptionByName(Subscription.Name)
+
+				if SubscriptionInfo == nil then
+					warn("Subscription '" .. Subscription.Name .. "' not found while checking expiration.")
+					continue
+				end
+
+				if Subscription.PausedAt ~= nil then continue end
+
+				if not CheckSubscriptionValidity(Subscription, SubscriptionInfo.Duration) then
+					SubscriptionModule.SubscriptionExpired:Fire(Player, {
+						Name         = Subscription.Name,
+						PurchaseDate = Subscription.PurchaseDate
+					})
+					table.remove(SubscriptionTable.ActiveSubscriptions, i)
+				elseif SubscriptionModule.IsSubscriptionExpiringSoon(Player, Subscription.Name) then
+					local RemainingSeconds = SubscriptionModule.GetTimeUntilExpiration(Player, Subscription.Name).TotalSeconds
+					SubscriptionModule.SubscriptionExpiringSoon:Fire(Player, Subscription, RemainingSeconds)
+				end
+			end
+		until Player == nil
+	end)
+
+	coroutine.resume(listener)
+end
+
+function SubscriptionModule.loadPlayer(Player: Player)
 	local PlayerSubscriptions = {
-		Name = Player.Name,
-		UserId = Player.UserId,
+		Name               = Player.Name,
+		UserId             = Player.UserId,
 		ActiveSubscriptions = {}
 	}
 
-	if PlayerData then
-		local decodeddata = HTTPService:JSONDecode(PlayerData)
+	local success, PlayerData = retryAsync(function()
+		return SubscriptionDataStore:GetAsync(Player.UserId)
+	end, 3)
 
-		for i, v in ipairs(decodeddata.ActiveSubscriptions) do
-			local SubscriptionInfo = nil
+	if success and PlayerData then
+		local decodedData = HTTPService:JSONDecode(PlayerData)
 
-			SubscriptionInfo = FindSubscriptionByName(v.Name)
-
+		for _, v in ipairs(decodedData.ActiveSubscriptions) do
+			local SubscriptionInfo = FindSubscriptionByName(v.Name)
 			if SubscriptionInfo == nil then continue end
 
-			if CheckSubscriptionValidity(v.PurchaseDate, SubscriptionInfo.Duration) == true then
-				local Subscription = {
-					Name = v.Name,
-					PurchaseDate = v.PurchaseDate
-				}
-
-				table.insert(PlayerSubscriptions.ActiveSubscriptions, Subscription)
+			if CheckSubscriptionValidity(v, SubscriptionInfo.Duration) then
+				table.insert(PlayerSubscriptions.ActiveSubscriptions, {
+					Name         = v.Name,
+					PurchaseDate = v.PurchaseDate,
+					PausedAt     = v.PausedAt
+				})
 			else
 				SubscriptionModule.SubscriptionExpired:Fire(Player, v)
 			end
@@ -350,65 +521,38 @@ function SubscriptionModule.loadPlayer(Player: Player) -- creates the subscripti
 	end
 
 	table.insert(SubscriptionModule.PlayerSubscriptions, PlayerSubscriptions)
-
-	local SubscriptionExpirationListener = coroutine.create(function() -- listens to every subscription that the player has and checks if it has expired
-		repeat
-			task.wait(SubscriptionModule.Expiration_Check_Rate)
-			if Player == nil then break end
-
-			local SubscriptionTable = SubscriptionModule.FetchPlayerSubscriptionData(Player)
-
-			if SubscriptionTable == nil then break end
-
-			-- Iterate backwards to safely remove while iterating
-			for i = #SubscriptionTable.ActiveSubscriptions, 1, -1 do
-				local Subscription = SubscriptionTable.ActiveSubscriptions[i]
-				local SubscriptionInfo = FindSubscriptionByName(Subscription.Name)
-
-				if SubscriptionInfo == nil then
-					warn("Subscription by the name '"..Subscription.Name.."' was not found while listening for expiration.")
-					continue
-				end
-
-				if Subscription.PurchaseDate ~= nil then
-					if not CheckSubscriptionValidity(Subscription.PurchaseDate, SubscriptionInfo.Duration) then
-						SubscriptionModule.SubscriptionExpired:Fire(Player, {
-							Name = Subscription.Name,
-							PurchaseDate = Subscription.PurchaseDate
-						})
-
-						table.remove(SubscriptionTable.ActiveSubscriptions, i)
-					end
-				end
-			end
-		until Player == nil
-	end)
-
-	coroutine.resume(SubscriptionExpirationListener)
+	startExpirationListener(Player)
 end
 
 function SubscriptionModule.unloadPlayer(Player: Player)
 	local SubscriptionTable, Index = SubscriptionModule.FetchPlayerSubscriptionData(Player)
 
-	if SubscriptionTable == nil then error(Player.Name.." not found in the main table of the SubscriptionService while saving data: Module error.") end
+	if SubscriptionTable == nil then
+		error(Player.Name .. " not found in PlayerSubscriptions during save. Module error.")
+	end
 
 	local SubscriptionsOwnedByPlayer = {}
 
 	for _, Subscription in ipairs(SubscriptionTable.ActiveSubscriptions) do
-		local SubscriptionInfo = FindSubscriptionByName(Subscription.Name)
+		if FindSubscriptionByName(Subscription.Name) == nil then
+			warn("Subscription '" .. Subscription.Name .. "' not found in the saving process.")
+		end
 
-		if SubscriptionInfo == nil then warn("Subscription by the name '"..Subscription.Name.."' was not found in the saving process.") end
-
-		table.insert(SubscriptionsOwnedByPlayer, {Name = Subscription.Name, PurchaseDate = Subscription.PurchaseDate})
+		table.insert(SubscriptionsOwnedByPlayer, {
+			Name         = Subscription.Name,
+			PurchaseDate = Subscription.PurchaseDate,
+			PausedAt     = Subscription.PausedAt
+		})
 	end
 
-	local PlayerData = {
-		ActiveSubscriptions = SubscriptionsOwnedByPlayer
-	}
+	local EncodedData = HTTPService:JSONEncode({ ActiveSubscriptions = SubscriptionsOwnedByPlayer })
 
-	local EncodedData = HTTPService:JSONEncode(PlayerData)
+	retryAsync(function()
+		SubscriptionDataStore:UpdateAsync(Player.UserId, function()
+			return EncodedData
+		end)
+	end, 3)
 
-	SubscriptionDataStore:SetAsync(Player.UserId, EncodedData)
 	table.remove(SubscriptionModule.PlayerSubscriptions, Index)
 end
 
