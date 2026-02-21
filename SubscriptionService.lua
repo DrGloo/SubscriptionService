@@ -11,11 +11,12 @@ easy to use substitute for this as this modules allows developers to set up subs
 -------------------------------------------------------------
  Settings
 -------------------------------------------------------------
- .     Expiration_Check_Rate (number):        Rate (seconds) for checking subscription expirations.
- .     Handle_Subscription_Purchases (bool):  When true, the module handles Developer Product receipts automatically.
- .     Print_Credits (boolean):               Print credits to console on startup.
- .     Product_Handling_Yield (number):       Yield before setting up the ProcessReceipt handler.
- .     Expiring_Soon_Threshold (number):      Days before expiry at which SubscriptionExpiringSoon fires. Default: 3.
+ .     Expiration_Check_Rate (number):          Rate (seconds) for checking subscription expirations.
+ .     Handle_Subscription_Purchases (bool):    When true, the module handles Developer Product receipts automatically.
+ .     Print_Credits (boolean):                 Print credits to console on startup.
+ .     Product_Handling_Yield (number):         Yield before setting up the ProcessReceipt handler.
+ .     Expiring_Soon_Threshold (number):        Days before expiry at which SubscriptionExpiringSoon fires. Default: 3.
+ .     Expiring_Soon_Fire_Cooldown (number):    Seconds between re-fires of SubscriptionExpiringSoon for the same player+subscription. Default: 3600.
 
 
 -------------------------------------------------------------
@@ -38,7 +39,12 @@ easy to use substitute for this as this modules allows developers to set up subs
 
  .     SubscriptionExpiringSoon:
              Fired during the expiration check loop when remaining time drops below Expiring_Soon_Threshold.
+             Subject to Expiring_Soon_Fire_Cooldown — will not re-fire until the cooldown has elapsed.
              Args: (Player: Player, Subscription: table, RemainingSeconds: number)
+
+ .     PlayerLoaded:
+             Fired at the end of loadPlayer, after all DataStore data is fetched and subscriptions are validated.
+             Args: (Player: Player)
 
 
 -------------------------------------------------------------
@@ -84,16 +90,33 @@ easy to use substitute for this as this modules allows developers to set up subs
  .     Module.GetSubscriptionPurchaseCount(Player: Player, SubscriptionName: string)
              return: number  (lifetime purchase + renewal count)
 
+ .     Module.GetActiveSubscriptionCount(Player: Player)
+             return: number  (count of currently active subscriptions)
+
+ .     Module.GetAllActiveSubscriptions(Player: Player)
+             return: { { Name: string, Expiration: number, RemainingSeconds: number }, ... }
+
+ .     Module.IsSubscriptionPaused(Player: Player, SubscriptionName: string)
+             return: true / false
+
+ .     Module.GetAllRegisteredSubscriptions()
+             return: { SubscriptionData, ... }  (shallow copy)
+
+ .     Module.GetSubscriptionProgressPercent(Player: Player, SubscriptionName: string)
+             return: number  (0 to 1, where 1 means fully elapsed / expired)
+
 
 -------------------------------------------------------------
  Functions — Subscription Management
 -------------------------------------------------------------
- .     Module.RegisterSubscription(SubscriptionData: any)        no return
- .     Module.GrantSubscription(Player: Player, SubscriptionName: string)        no return
- .     Module.RevokeSubscription(Player: Player, SubscriptionName: string)       no return
+ .     Module.RegisterSubscription(SubscriptionData: any)                                  no return
+ .     Module.UnregisterSubscription(SubscriptionName: string)                             no return
+ .     Module.GrantSubscription(Player: Player, SubscriptionName: string)                  no return
+ .     Module.RevokeSubscription(Player: Player, SubscriptionName: string)                 no return
+ .     Module.RevokeAllSubscriptions(Player: Player)                                       no return
  .     Module.AdjustSubscription(Player: Player, SubscriptionName: string, Days: number)   no return
- .     Module.PauseSubscription(Player: Player, SubscriptionName: string)        no return
- .     Module.ResumeSubscription(Player: Player, SubscriptionName: string)       no return
+ .     Module.PauseSubscription(Player: Player, SubscriptionName: string)                  no return
+ .     Module.ResumeSubscription(Player: Player, SubscriptionName: string)                 no return
 
 
 -------------------------------------------------------------
@@ -119,8 +142,9 @@ local Signal       = require(SignalModuleObject)
 local DateTimeUtils = require(DateTimeUtilsObject)
 
 -- Tables --
-local registeredSubscriptions = {}
-local productFunctions        = {}
+local registeredSubscriptions  = {}
+local productFunctions         = {}
+local expiringSoonCooldowns    = {}
 
 -- DataStores --
 local SubscriptionDataStore  = DataStoreService:GetDataStore("uj6rtrtrjursjtrsjtrsxrtj")
@@ -214,6 +238,7 @@ local SubscriptionModule = {
 	Print_Credits                 = true,
 	Product_Handling_Yield        = 0.5,
 	Expiring_Soon_Threshold       = 3,
+	Expiring_Soon_Fire_Cooldown   = 3600,
 
 	-- DO NOT TOUCH BELOW --
 	PlayerSubscriptions = {}
@@ -223,6 +248,7 @@ SubscriptionModule.SubscriptionExpired      = Signal.new()
 SubscriptionModule.SubscriptionPurchased    = Signal.new()
 SubscriptionModule.SubscriptionRenewed      = Signal.new()
 SubscriptionModule.SubscriptionExpiringSoon = Signal.new()
+SubscriptionModule.PlayerLoaded             = Signal.new()
 
 -- Date / Time Utilities (delegated to DateTimeUtils) --
 function SubscriptionModule.UnixToDDMMYY(Timestamp: number): string
@@ -330,6 +356,88 @@ function SubscriptionModule.GetSubscriptionPurchaseCount(Player: Player, Subscri
 		return PurchaseCountDataStore:GetAsync(key)
 	end, 3)
 	return count or 0
+end
+
+function SubscriptionModule.GetActiveSubscriptionCount(Player: Player): number
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return 0
+	end
+
+	return #PlayerData.ActiveSubscriptions
+end
+
+function SubscriptionModule.GetAllActiveSubscriptions(Player: Player): {any}
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return {}
+	end
+
+	local Summary = {}
+
+	for _, Subscription in ipairs(PlayerData.ActiveSubscriptions) do
+		local Expiration     = SubscriptionModule.GetSubscriptionExpiration(Player, Subscription.Name)
+		local RemainingSeconds = SubscriptionModule.GetTimeUntilExpiration(Player, Subscription.Name).TotalSeconds
+
+		table.insert(Summary, {
+			Name             = Subscription.Name,
+			Expiration       = Expiration,
+			RemainingSeconds = RemainingSeconds
+		})
+	end
+
+	return Summary
+end
+
+function SubscriptionModule.IsSubscriptionPaused(Player: Player, SubscriptionName: string): boolean
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return false
+	end
+
+	local Subscription = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+
+	if Subscription == nil then
+		return false
+	end
+
+	return Subscription.PausedAt ~= nil
+end
+
+function SubscriptionModule.GetAllRegisteredSubscriptions(): {any}
+	local Copy = {}
+	for _, v in ipairs(registeredSubscriptions) do
+		table.insert(Copy, v)
+	end
+	return Copy
+end
+
+function SubscriptionModule.GetSubscriptionProgressPercent(Player: Player, SubscriptionName: string): number
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return 1
+	end
+
+	local Subscription    = FindSubscriptionByNameInTable(SubscriptionName, PlayerData.ActiveSubscriptions)
+	local SubscriptionInfo = FindSubscriptionByName(SubscriptionName)
+
+	if Subscription == nil or SubscriptionInfo == nil then
+		warn('Subscription "' .. SubscriptionName .. '" not found for ' .. Player.Name)
+		return 1
+	end
+
+	local Elapsed  = os.time() - Subscription.PurchaseDate
+	local Total    = toSeconds(SubscriptionInfo.Duration)
+
+	return math.clamp(Elapsed / Total, 0, 1)
 end
 
 -- Subscription Management --
@@ -452,6 +560,29 @@ function SubscriptionModule.ResumeSubscription(Player: Player, SubscriptionName:
 	Subscription.PausedAt = nil
 end
 
+function SubscriptionModule.RevokeAllSubscriptions(Player: Player)
+	local PlayerData = SubscriptionModule.FetchPlayerSubscriptionData(Player)
+
+	if PlayerData == nil then
+		warn("Subscription data failed to fetch!")
+		return
+	end
+
+	for i = #PlayerData.ActiveSubscriptions, 1, -1 do
+		SubscriptionModule.RevokeSubscription(Player, PlayerData.ActiveSubscriptions[i].Name)
+	end
+end
+
+function SubscriptionModule.UnregisterSubscription(SubscriptionName: string)
+	for i, v in ipairs(registeredSubscriptions) do
+		if v.Name == SubscriptionName then
+			table.remove(registeredSubscriptions, i)
+			return
+		end
+	end
+	warn('No registered subscription found with the name "' .. SubscriptionName .. '".')
+end
+
 -- Player Lifecycle --
 local function startExpirationListener(Player: Player)
 	local listener = coroutine.create(function()
@@ -480,8 +611,14 @@ local function startExpirationListener(Player: Player)
 					})
 					table.remove(SubscriptionTable.ActiveSubscriptions, i)
 				elseif SubscriptionModule.IsSubscriptionExpiringSoon(Player, Subscription.Name) then
-					local RemainingSeconds = SubscriptionModule.GetTimeUntilExpiration(Player, Subscription.Name).TotalSeconds
-					SubscriptionModule.SubscriptionExpiringSoon:Fire(Player, Subscription, RemainingSeconds)
+					local cooldownKey = tostring(Player.UserId) .. "_" .. Subscription.Name
+					local lastFired   = expiringSoonCooldowns[cooldownKey]
+
+					if lastFired == nil or (os.time() - lastFired) >= SubscriptionModule.Expiring_Soon_Fire_Cooldown then
+						local RemainingSeconds = SubscriptionModule.GetTimeUntilExpiration(Player, Subscription.Name).TotalSeconds
+						expiringSoonCooldowns[cooldownKey] = os.time()
+						SubscriptionModule.SubscriptionExpiringSoon:Fire(Player, Subscription, RemainingSeconds)
+					end
 				end
 			end
 		until Player == nil
@@ -522,6 +659,7 @@ function SubscriptionModule.loadPlayer(Player: Player)
 
 	table.insert(SubscriptionModule.PlayerSubscriptions, PlayerSubscriptions)
 	startExpirationListener(Player)
+	SubscriptionModule.PlayerLoaded:Fire(Player)
 end
 
 function SubscriptionModule.unloadPlayer(Player: Player)
@@ -546,6 +684,13 @@ function SubscriptionModule.unloadPlayer(Player: Player)
 	end
 
 	local EncodedData = HTTPService:JSONEncode({ ActiveSubscriptions = SubscriptionsOwnedByPlayer })
+
+	local userIdPrefix = tostring(Player.UserId) .. "_"
+	for key in pairs(expiringSoonCooldowns) do
+		if key:sub(1, #userIdPrefix) == userIdPrefix then
+			expiringSoonCooldowns[key] = nil
+		end
+	end
 
 	retryAsync(function()
 		SubscriptionDataStore:UpdateAsync(Player.UserId, function()
